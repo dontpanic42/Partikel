@@ -100,7 +100,7 @@ Particle.prototype = {
 
 		this.acc = new Vec(tAccX, tAccY);
 
-		//this.acc.clampsq(1.0);
+		this.acc.clampsq(1.0);
 	}
 }
 
