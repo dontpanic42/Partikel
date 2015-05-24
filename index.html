@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title></title>
+	<style>
+	* {
+		margin: 0;
+		padding: 0;
+	}
+
+    canvas {
+    	background-color: black;
+    }
+
+	html, body {
+		width: 100%;
+		height: 100%;
+		overflow: hidden;
+	}
+
+	.btn {
+		position: absolute;
+		margin: 10px;
+		color: white;
+	}
+
+	#add {
+		left: 10px;
+		top: 10px;
+	}
+
+	#field {
+		left: 100px;
+		top: 10px;
+	}
+	</style>
+</head>
+<body>
+	<canvas></canvas>
+	<div class='btn' id='add'>add</div>
+	<div class='btn' id='field'>field</div>
+	<script type="text/javascript" src="particle.js"></script>
+	<script type="text/javascript">
+	var app = new App(document.querySelector('canvas'));
+	app.mainloop();
+
+	document.querySelector('#add').onmousedown = function(ev) {
+		app.setmode('add');
+		ev.stopPropagation();
+	}
+
+	document.querySelector('#field').onmousedown = function(ev) {
+		app.setmode('field');
+		ev.stopPropagation();
+	}
+	</script>
+</body>
+</html>
