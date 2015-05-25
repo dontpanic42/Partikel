@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+	<meta name="viewport" content="width=device-width, minimum-scale=1.0">
 	<title></title>
 	<style>
 	* {
@@ -41,18 +42,25 @@
 	<div class='btn' id='field'>field</div>
 	<script type="text/javascript" src="particle.js"></script>
 	<script type="text/javascript">
-	var app = new App(document.querySelector('canvas'));
-	app.mainloop();
+		console.log(Particles);
 
-	document.querySelector('#add').onmousedown = function(ev) {
-		app.setmode('add');
-		ev.stopPropagation();
-	}
+		document.querySelector('#add').onmousedown = function(ev) {
+			Particles.setMouseMode('emit');
+			ev.stopPropagation();
+		};
 
-	document.querySelector('#field').onmousedown = function(ev) {
-		app.setmode('field');
-		ev.stopPropagation();
-	}
+		document.querySelector('#field').onmousedown = function(ev) {
+			Particles.setMouseMode('field');
+			ev.stopPropagation();
+		}
+
+
+		//Particles.iterate();
+		Particles.mainloop();
+		//Particles.test();
+		//while(true) {
+		//	window.requestAnimationFrame(binding);
+		//}
 	</script>
 </body>
 </html>

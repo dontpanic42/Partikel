@@ -1,304 +1,440 @@
-var Options = {
-	//maxTrail: 48,
-	forceGradient: 1.2,
-	maxVel: 2.5,
-	particleSize: 2,
-};
+var Particles = (function(win) {
 
-var Vec = function(x, y) {
-	this.x = x;
-	this.y = y;
-}
+	var MAX_PARTICLES = 10000;
+	var MAX_VELOCITY = 2.5;
+	var FORCE_GRADIENT = 1.2;
+	var PARTICLE_SIZE = 2;
 
-Vec.prototype = {
-	add: function(other) {
-		this.x += other.x;
-		this.y += other.y;
-	},
 
-	mul: function(cons) {
-		this.x *= cons;
-		this.y *= cons;
-	},
+	var SparseArray = function(size) {
+		this.data = new Array(size);
+		this.freeIndices = new Int32Array(new Array(size));
+		this.freePointer = size - 1;
+		this.used = 0;
 
-	mag: function() {
-		return Math.sqrt((this.x * this.x) + (this.y * this.y));
-	},
-
-	magsq: function() {
-		return (this.x * this.x) + (this.y * this.y)
-	},
-
-	clamp: function(val) {
-		var mag = this.mag();
-		if(mag > val) {
-			var modifier = val / mag;
-			this.x *= modifier;
-			this.y *= modifier;
+		for(var i = 0; i < size; i++) {
+			this.freeIndices[i] = i;
 		}
-	},
+	};
 
-	clampsq: function(val) {
-		val *= val;
-		var mag = this.magsq();
-		if(mag > val) {
-			var modifier = val / mag;
-			this.x *= modifier;
-			this.y *= modifier;
+	SparseArray.prototype.insert = function(obj) {
+		var idx = this.freeIndices[this.freePointer--];
+		obj._index = idx;
+		this.data[idx] = obj;
+		this.used++;
+	};
+
+	SparseArray.prototype.remove = function(obj) {
+		var idx = obj._index;
+		this.freeIndices[++this.freePointer] = idx;
+		this.data[idx] = null;
+		obj._index = null;
+		this.used--;
+	};
+
+	var List = function() {
+		this.root = null;
+		this.size = 0;
+	};
+
+	List.prototype.insert = function(obj) {
+		obj._prev = obj._next = null;
+
+		if(!this.root) {
+			this.root = obj;
+		} else {
+			this.root._prev = obj;
+			obj._next = this.root;
+			this.root = obj;
 		}
-	},
 
-	angle: function() {
-		return Math.atan2(this.y, this.x);
-	},
+		this.size++;
+	};
 
-	clone: function() {
-		return new Vec(this.x, this.y);
+	List.prototype.remove = function(obj) {
+		if(this.root === obj) {
+			if(this.root._next) {
+				var newRoot = this.root._next;
+				newRoot._prev = null;
+				this.root = newRoot;
+			} else {
+				this.root = null;
+			}
+		} else {
+			if(obj._next) {
+				obj._next._prev = obj._prev;
+			}
+
+			if(obj._prev) {
+				obj._prev._next = obj._next;
+			}
+		}
+
+		obj._prev = null;
+		obj._next = null;
+
+		this.size--;
+	};
+
+	var Pool = function(objType, size) {
+		this.objType = objType;
+		this.objs = new Array(size);
+		this.used = new Int32Array(new Array(size));
+		this.free = new Int32Array(new Array(size));
+		//Zeig auf das zuletzt hinzugefügt Objekt, oder -1, wenn leer
+		this.usedpt = -1;
+		//Zeigt auf das nächste leere element
+		this.freept = size - 1;
+
+		for(var i = 0; i < size; i++) {
+			this.free[i] = i;
+		}
+	};
+
+	Pool.prototype.createObj = function(argum) {
+		var objType = this.objType;
+		function F(args) {
+			return objType.apply(this, args);
+		}
+
+		F.prototype = objType.prototype;
+
+		return function() {
+			return new F(argum);
+		}	
+	};
+
+	Pool.prototype.create = function(posX, posY, velX, velY, accX, accY, damp) {
+		if(this.usedpt == -1) {
+			//console.log('erzeuge neues objekt', 'frei: ', freept, 'benutzt', usedpt);
+			//return this.createObj(arguments).apply(this);
+			return new Particle(posX, posY, velX, velY, accX, accY, damp);
+		} else {
+			var idx = this.used[this.usedpt--];
+			var obj = this.objs[idx];
+			this.objs[idx] = null;
+			this.free[this.freept--] = idx;
+
+			if(obj.reset) {
+				obj.reset(posX, posY, velX, velY, accX, accY, damp);
+			}
+
+			return obj;
+		}
+	};
+
+	Pool.prototype.retain = function(obj) {
+		var idx = this.free[this.freept--];
+		this.objs[idx] = obj;
+		this.used[++this.usedpt] = idx;
 	}
 
-}
 
-Vec.fromAngle = function(angle, mag) {
-	return new Vec(mag * Math.cos(angle), mag * Math.sin(angle));
-}
 
-var Particle = function(pos, vel, acc, damp) {
-	this.pos = pos || new Vec(0, 0);
-	this.vel = vel || new Vec(0, 0);
-	this.acc = acc || new Vec(0, 0);
-	this.damp = damp || 0;
-	this.age = 0;
-	this.maxAge = (Math.random() * 100) + 10000 | 0;
-}
+	var Vec = {
+		create: function(x, y) {
+			return new Float32Array([x, y]);
+		},
 
-Particle.prototype = {
-	move: function() {
+		clone: function(a) {
+			return new Float32Array([a[0], a[1]]);
+		},
 
-		this.vel.add(this.acc);
-		this.vel.clampsq(Options.maxVel);
-		this.pos.add(this.vel);
-		this.vel.mul(this.damp);
-	},
+		add: function(a, b, out) {
+			out[0] = a[0] + b[0];
+			out[1] = a[1] + b[1];
+		},
 
-	addField: function(fields) {
+		mul: function(a, value, out) {
+			out[0] = a[0] * value;
+			out[1] = a[1] * value;
+		},
+
+		magsq: function(a) {
+			return (a[0] * a[0]) + (a[1] * a[1]);
+		},
+
+		clampsq: function(a, value, out) {
+			value *= value;
+			var mag = Vec.magsq(a);
+			if(mag > value) {
+				var mod = value / mag;
+				out[0] = a[0] * mod;
+				out[1] = a[1] * mod;
+			}
+		},
+
+		angle: function(a) {
+			return Math.atan2(a[0], a[1]);
+		},
+
+		fromAngle: function(angle, mag, out) {
+			out[0] = Math.cos(angle) * mag;
+			out[1] = Math.sin(angle) * mag;
+		}
+	};
+
+
+	var Field = function(pos, mass) {
+		this.pos = pos || Vec.create(0, 0);
+		this.mass = mass || 1.0;
+	}
+
+	var Particle = function(posX, posY, velX, velY, accX, accY, damp) {	
+		this.pos = new Float32Array([0, 0]);
+		this.vel = new Float32Array([0, 0]);
+		this.acc = new Float32Array([0, 0]);	
+		this.reset(posX, posY, velX, velY, accX, accY, damp);
+	};
+
+	Particle.prototype.reset = function(posX, posY, velX, velY, accX, accY, damp) {
+		this.pos[0] = posX;
+		this.pos[1] = posY;
+		this.vel[0] = velX;
+		this.vel[1] = velY;
+		this.acc[0] = accX;
+		this.acc[1] = accY;
+		this.damp = damp;
+	}
+
+	Particle.prototype.move = function() {
+		Vec.add(this.vel, this.acc, this.vel);
+		Vec.clampsq(this.vel, MAX_VELOCITY, this.vel);
+		Vec.add(this.vel, this.pos, this.pos);
+		Vec.mul(this.vel, this.damp, this.vel);
+		//Vec.mul(this.acc, this.damp, this.acc);
+	};
+
+	Particle.prototype.addField = function(fields) {
 		var tAccX = 0;
 		var tAccY = 0;
-
 
 		for(var i = 0; i < fields.length; i++) {
 			var field = fields[i];
 
-			var dx = field.pos.x - this.pos.x;
-			var dy = field.pos.y - this.pos.y;
+			//console.log('fieldpos', field.pos);
 
-			var force = field.mass / Math.pow(dx*dx + dy*dy, Options.forceGradient) * .6;
+			var dx = field.pos[0] - this.pos[0];
+			var dy = field.pos[1] - this.pos[1];
+
+			var force = field.mass / Math.pow(dx*dx + dy*dy, FORCE_GRADIENT) * .6;
 
 			tAccX += dx * force;
 			tAccY += dy * force;
 
 		}
 
-		this.acc = new Vec(tAccX, tAccY);
+		this.acc[0] = tAccX;
+		this.acc[1] = tAccY;
 
-		this.acc.clampsq(1.0);
+		Vec.clampsq(this.acc, 1.0, this.acc);
 	}
-}
 
-var Emitter = function(pos, vel, spread) {
-	this.pos = pos;
-	this.vel = vel;
-	//this.spread = spread || Math.PI / 32;
-	this.spread = spread || Math.PI * 2;
-	this.enabled = false;
-}
-
-Emitter.prototype = {
-	emit: function() {
-		var angle = this.vel.angle() + this.spread - (Math.random() * this.spread * 2);
-		var mag = (this.vel.magsq()) * Math.random() * 0.3 + 0.1;
-		var vel = Vec.fromAngle(angle, mag);
-
-		//console.log('Emitt angle', vel);
-		return new Particle(this.pos.clone(), vel, new Vec(0, 0), 0.9995);
-
+	var Emitter = function(pos, vel, spread, rate) {
+		this.pos = pos || Vec.create(0, 0);
+		this.vel = vel || Vec.create(0, 0);
+		this.rate = rate || 15;
+		this.spread = spread || Math.PI * 2;
+		this.enabled = false;
 	}
-}
 
-var Field = function(pos, mass) {
-	this.pos = pos || new Vec(0, 0);
-	this.mass = mass || 1.0;
-}
+	Emitter.prototype.emit = function(pool) {
+		var angle = Vec.angle(this.vel) + this.spread - (Math.random() * this.spread * 2);
+		var mag = Vec.magsq(this.vel) * Math.random() * 0.3 + 0.1;
+		//TODO 'tmp' vector benutzen
 
-var App = function(canvas) {
-	this.cv = canvas;
-	canvas.width = window.innerWidth;
-	canvas.height = window.innerHeight;
+		var vel = Vec.create(0, 0);
+		Vec.fromAngle(angle, mag, vel);
 
-	this.ctx = canvas.getContext('2d');
-	this.loopHandler = this.mainloop.bind(this);
 
-	this.mode = 0;
-	this.particles = [];
-	this.fields = [];
-	this.emitters = [
-		new Emitter(new Vec(100, 230), Vec.fromAngle(0, 2))
-	];
+		//console.log(vel);
+		//posX, posY, velX, velY, accX, accY, damp
+		return pool.create(this.pos[0], this.pos[1],
+			vel[0], vel[1], 0, 0, 0.9995);
 
-	var self = this;
-	window.onmousemove = function(ev) {
-		if(self.mode == 0) {
-			self.emitters[0].pos.x = ev.pageX;
-			self.emitters[0].pos.y = ev.pageY;
-		} else {
-			if(self.fields.length) {
-				self.fields[0].pos.x = ev.pageX;
-				self.fields[0].pos.y = ev.pageY;
+		//return new Particle(this.pos[0], this.pos[1],
+		//	vel[0], vel[1], 0, 0, 0.995);
+	}
+
+	var App = function() {
+		this.cv = document.querySelector('canvas');
+		this.cv.width = win.innerWidth;
+		this.cv.height = win.innerHeight;
+		this.ctx = this.cv.getContext('2d');
+
+		this.particles_pool = new Pool(Particle, MAX_PARTICLES);// createPool(Particle, MAX_PARTICLES);
+		//var particles = new List();
+		this.plist = new SparseArray(MAX_PARTICLES);
+
+		var emitterVelocity = Vec.create(0, 0);
+		Vec.fromAngle(0, 2, emitterVelocity);
+		var mouseEmitter = new Emitter(Vec.create(100, 230), emitterVelocity); 
+
+		this.emitters = [mouseEmitter];
+
+		var mouseAttract = new Field(Vec.create(0, 0), 140);
+		var mouseRepell  = new Field(Vec.create(0, 0), -140);
+
+		this.fields = [];
+
+		this.mouseMode = 0;
+		this.loopHandler = this.mainloop.bind(this);
+
+		var self = this;
+		win.onmousemove = function(ev) {
+			switch(self.mouseMode) {
+				case 0: {
+					mouseEmitter.pos[0] = ev.pageX;
+					mouseEmitter.pos[1] = ev.pageY;
+					break;
+				}
+
+				case 1: {
+					if(self.fields.length) {
+						self.fields[0].pos[0] = ev.pageX;
+						self.fields[0].pos[1] = ev.pageY;
+					}
+				}
 			}
-		}
-	}
+		};
 
-	window.onmousedown = function(ev) {
-		if(self.mode == 0) {
-			self.emitters[0].enabled = true;
-		} else {
-			self.fields = [];
-			if(ev.button == 0) {
-				self.fields.push(new Field(new Vec(ev.pageX, ev.pageY), 140));
-			} else {
-				self.fields.push(new Field(new Vec(ev.pageX, ev.pageY), -140));
+		win.onmousedown = function(ev) {
+			console.log("Particles: ", self.plist.used);
+
+			switch(self.mouseMode) {
+				case 0: { 
+					mouseEmitter.enabled = true; 
+					ev.stopPropagation();
+					break;
+				}
+
+				case 1: {
+					if(ev.button == 0) {
+						self.fields[0] = mouseAttract;
+					} else {
+						self.fields[0] = mouseRepell;
+					}
+
+					ev.stopPropagation();
+					break;
+				}
+
+				default: break;
 			}
-		}
 
-		console.log("Particles: " + self.particles.length);
-		ev.stopPropagation();
-	}
+			win.onmousemove(ev);
+		};
 
-	window.oncontextmenu = function(ev) {
-		ev.stopPropagation();
-		return false;
-	}
+		win.oncontextmenu = function(ev) {
+			ev.stopPropagation();
+			return false;
+		};
 
-	window.onmouseup = function(ev) {
-		self.emitters[0].enabled = false;
-		self.fields = [];
-	}
+		win.onmouseup = function(ev) {
+			mouseEmitter.enabled = false;
+			self.fields.length = 0;
+		};
+	};
 
-	this.emissionRate = 15;
-	this.maxParticles = 30000;
-
-	this.ctx.fillStyle = "rgb(0, 0, 0)";
-	this.ctx.fillRect(0, 0, this.cv.width, this.cv.height);
-}
-
-App.prototype = {
-	//'add' or 'field'
-	setmode: function(mode) {
-		if(mode == 'add') {
-			this.mode = 0;
-		} else if(mode == 'field') {
-			this.mode = 1;
-		}
-	},
-
-	mainloop: function() {
-		//console.log('rung', this.particles.length);
-
-		this.clear();
-		this.update();
-		this.draw();
-		this.queue();
-	},
-
-	clear: function() {
+	App.prototype.clear = function() {
 		this.ctx.save();
 		this.ctx.globalCompositeOperation = 'multiply';
 		this.ctx.fillStyle = 'rgb(238,238,238)';
 		this.ctx.fillRect(0, 0, this.cv.width, this.cv.height);
 		this.ctx.restore();
-	},
+	};
 
-	queue: function() {
-		window.requestAnimationFrame(this.loopHandler)
-	},
-
-	update: function() {
-		this._addParticles();
-		this._updateParticles(this.cv.width, this.cv.height);
-	},
-
-	draw: function() {
-		this._renderParticles();
-	},
-
-	_addParticles: function() {
-		if(this.particles.length > this.maxParticles) {
+	App.prototype.addParticles = function() {
+		if(this.plist.used >= MAX_PARTICLES) {
 			return;
 		}
 
 		for(var i = 0; i < this.emitters.length; i++) {
 			var emitter = this.emitters[i];
-			if(!emitter.enabled) {
-				return;
-			}
-
-			for(var j = 0; j < this.emissionRate; j++) {
-				this.particles.push(emitter.emit());
+			if(emitter.enabled) {
+				for(var j = 0; j < emitter.rate; j++) {
+					this.plist.insert(emitter.emit(this.particles_pool));
+				}
 			}
 		}
-	},
+	};
 
+	App.prototype.updateParticles = function() {
+		var maxX = this.cv.width;
+		var maxY = this.cv.height;
 
-	_updateParticles: function(maxX, maxY) {				
-		for(var i = this.particles.length - 1; i >= 0 ; --i) {
+		for(var i = 0; i < MAX_PARTICLES; i++) {
+			var particle = this.plist.data[i];
+			if(particle == null) {
+				continue;
+			}
 
-			var particle = this.particles[i];
 			var pos = particle.pos;
+			if( pos[0] < 0 ||
+				pos[1] < 0 ||
+				pos[0] > maxX ||
+				pos[1] > maxY) {
 
-			if( pos.x < 0 || 
-				pos.y < 0 || 
-				pos.x > maxX || 
-				pos.y > maxY) {
-
-				this.particles.splice(i, 1);
-				continue
+				this.plist.remove(particle);
+				this.particles_pool.retain(particle);
+				continue;
 			}
 
-			if(this.fields.length) {
-				particle.addField(this.fields);
-			}
-
+			particle.addField(this.fields);
 			particle.move();
-			particle.age++;
-
 		}
-	},
+	};
 
-	_interpolateRgb: function(r1, g1, b1, r2, g2, b2, t) {
+	App.prototype.update = function() {
+		this.addParticles();
+		this.updateParticles();
+	};
+
+	App.prototype.interpolateRgb = function(r1, g1, b1, r2, g2, b2, t) {
 		var r = (r1 + t * (r2 - r1)) | 0;
 		var g = (g1 + t * (g2 - g1)) | 0;
 		var b = (b1 + t * (b2 - b1)) | 0;
 
 		return "rgb(" + r + ", " + g + ", " + b + ")";
-	},
+	};
 
-	_renderParticles: function() {
+	App.prototype.setMouseMode = function(str) {
+		switch(str) {
+			case 'emit': this.mouseMode = 0; break;
+			case 'field': this.mouseMode = 1; break;
+			default: throw new Error("Unknown mouse mode");
+		}
+	};
 
-		var ctx = this.ctx;
+	App.prototype.render = function() {
+		//var particle = particles.root;
+		var maxVel = MAX_VELOCITY * MAX_VELOCITY;
 
+		for(var i = 0; i < MAX_PARTICLES; i++) {
+			var particle = this.plist.data[i];
+			if(particle == null) {
+				continue;
+			}
 
-		for(var p = 0; p < this.particles.length; p++) {
-
-			var maxVel = Options.maxVel * Options.maxVel;
-			var curVel = this.particles[p].vel.magsq();
-
+			var curVel = Vec.magsq(particle.vel);
 			var t = curVel / maxVel;
 
-			//ctx.fillStyle = this._interpolateRgb(11,72,107,  207,240,158,  t);
-			//ctx.fillStyle = this._interpolateRgb(63,184,175,  255,61,127,  t);
-			//ctx.fillStyle = this._interpolateRgb(218,214,202,  27,176,206,  t);
-			ctx.fillStyle = this._interpolateRgb(204,12,57,  22,147,167,  t);
-			var prev = this.particles[p].pos;
-			ctx.fillRect(prev.x, prev.y, Options.particleSize, Options.particleSize);
+			this.ctx.fillStyle = this.interpolateRgb(204,12,57,  22,147,167,  t);
+			var pos = particle.pos;
+			this.ctx.fillRect(pos[0], pos[1],
+					 PARTICLE_SIZE, 
+					 PARTICLE_SIZE);
+
 		}
-	}
-}
+	};
+
+	App.prototype.mainloop = function() {
+		this.clear();
+		this.update();
+		this.render();
+		win.requestAnimationFrame(this.loopHandler);
+	};
+
+	return new App();
+
+})(window);
