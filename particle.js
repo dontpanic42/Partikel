@@ -387,7 +387,7 @@ var Particles = (function(win) {
 		var lookup = this.colorLookup;
 		var ctx = this.ctx;
 
-		var particle, vel, pos, t;
+		var particle, vel, pos, t, lastt = -1;
 
 		for(var i = 0; i < MAX_PARTICLES; i++) {
 			particle = data[i];
@@ -402,12 +402,14 @@ var Particles = (function(win) {
 			t *= 255;
 			t |= 0;
 
-			//this.ctx.fillStyle = this.interpolateRgb(204,12,57,  22,147,167,  t);
-			ctx.fillStyle = lookup[t];
+			if(lastt != t) {
+				ctx.fillStyle = lookup[t];
+				lastt = t;
+			}
+
 			ctx.fillRect(pos[0], pos[1],
 					 PARTICLE_SIZE, 
 					 PARTICLE_SIZE);
-
 		}
 	};
 
