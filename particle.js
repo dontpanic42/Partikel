@@ -8,7 +8,7 @@ var Particles = (function(win) {
 
 	var SparseArray = function(size) {
 		this.data = new Array(size);
-		this.freeIndices = new Int32Array(new Array(size));
+		this.freeIndices = new Array(size);
 		this.freePointer = size - 1;
 		this.used = 0;
 
@@ -32,55 +32,13 @@ var Particles = (function(win) {
 		this.used--;
 	};
 
-	var List = function() {
-		this.root = null;
-		this.size = 0;
-	};
 
-	List.prototype.insert = function(obj) {
-		obj._prev = obj._next = null;
-
-		if(!this.root) {
-			this.root = obj;
-		} else {
-			this.root._prev = obj;
-			obj._next = this.root;
-			this.root = obj;
-		}
-
-		this.size++;
-	};
-
-	List.prototype.remove = function(obj) {
-		if(this.root === obj) {
-			if(this.root._next) {
-				var newRoot = this.root._next;
-				newRoot._prev = null;
-				this.root = newRoot;
-			} else {
-				this.root = null;
-			}
-		} else {
-			if(obj._next) {
-				obj._next._prev = obj._prev;
-			}
-
-			if(obj._prev) {
-				obj._prev._next = obj._next;
-			}
-		}
-
-		obj._prev = null;
-		obj._next = null;
-
-		this.size--;
-	};
 
 	var Pool = function(objType, size) {
 		this.objType = objType;
 		this.objs = new Array(size);
-		this.used = new Int32Array(new Array(size));
-		this.free = new Int32Array(new Array(size));
+		this.used = new Array(size);
+		this.free = new Array(size);
 		//Zeig auf das zuletzt hinzugefügt Objekt, oder -1, wenn leer
 		this.usedpt = -1;
 		//Zeigt auf das nächste leere element
@@ -133,11 +91,11 @@ var Particles = (function(win) {
 
 	var Vec = {
 		create: function(x, y) {
-			return new Float32Array([x, y]);
+			return [x, y];
 		},
 
 		clone: function(a) {
-			return new Float32Array([a[0], a[1]]);
+			return [a[0], a[1]];
 		},
 
 		add: function(a, b, out) {
@@ -181,9 +139,9 @@ var Particles = (function(win) {
 	}
 
 	var Particle = function(posX, posY, velX, velY, accX, accY, damp) {	
-		this.pos = new Float32Array([0, 0]);
-		this.vel = new Float32Array([0, 0]);
-		this.acc = new Float32Array([0, 0]);	
+		this.pos = [0, 0];
+		this.vel = [0, 0];
+		this.acc = [0, 0];	
 		this.reset(posX, posY, velX, velY, accX, accY, damp);
 	};
 
@@ -198,26 +156,41 @@ var Particles = (function(win) {
 	}
 
 	Particle.prototype.move = function() {
-		Vec.add(this.vel, this.acc, this.vel);
+		var vel = this.vel;
+		var acc = this.acc;
+		var pos = this.pos;
+		var damp = this.damp;
+
+		vel[0] += acc[0];
+		vel[1] += acc[1];
+
 		Vec.clampsq(this.vel, MAX_VELOCITY, this.vel);
-		Vec.add(this.vel, this.pos, this.pos);
+
+		pos[0] += vel[0];
+		pos[1] += vel[1];
+
 		Vec.mul(this.vel, this.damp, this.vel);
-		//Vec.mul(this.acc, this.damp, this.acc);
+
+		vel[0] *= damp;
+		vel[1] *= damp;
+
+		acc[0] = acc[1] = 0;
 	};
 
 	Particle.prototype.addField = function(fields) {
 		var tAccX = 0;
 		var tAccY = 0;
+		var field, dx, dy, force;
 
 		for(var i = 0; i < fields.length; i++) {
-			var field = fields[i];
+			field = fields[i];
 
 			//console.log('fieldpos', field.pos);
 
-			var dx = field.pos[0] - this.pos[0];
-			var dy = field.pos[1] - this.pos[1];
+			dx = field.pos[0] - this.pos[0];
+			dy = field.pos[1] - this.pos[1];
 
-			var force = field.mass / Math.pow(dx*dx + dy*dy, FORCE_GRADIENT) * .6;
+			force = field.mass / Math.pow(dx*dx + dy*dy, FORCE_GRADIENT) * .6;
 
 			tAccX += dx * force;
 			tAccY += dy * force;
@@ -247,13 +220,9 @@ var Particles = (function(win) {
 		Vec.fromAngle(angle, mag, vel);
 
 
-		//console.log(vel);
-		//posX, posY, velX, velY, accX, accY, damp
 		return pool.create(this.pos[0], this.pos[1],
 			vel[0], vel[1], 0, 0, 0.9995);
 
-		//return new Particle(this.pos[0], this.pos[1],
-		//	vel[0], vel[1], 0, 0, 0.995);
 	}
 
 	var App = function() {
@@ -279,6 +248,15 @@ var Particles = (function(win) {
 
 		this.mouseMode = 0;
 		this.loopHandler = this.mainloop.bind(this);
+
+		/* Create color lookup */
+		this.colorLookup = new Array(255);
+		for(var i = 0; i < 255; i++) {
+			this.colorLookup[i] = this.interpolateRgb(204,12,57,  
+				22,147,167,  
+				i / 255.0);
+
+		}
 
 		var self = this;
 		win.onmousemove = function(ev) {
@@ -363,24 +341,35 @@ var Particles = (function(win) {
 		var maxX = this.cv.width;
 		var maxY = this.cv.height;
 
+		var plist = this.plist;
+		var data = this.plist.data;
+		var pool = this.particles_pool;
+		var fields = this.fields;
+		var fieldslen = this.fields.length;
+
+		var particle, pos;
+
 		for(var i = 0; i < MAX_PARTICLES; i++) {
-			var particle = this.plist.data[i];
+			particle = data[i];
 			if(particle == null) {
 				continue;
 			}
 
-			var pos = particle.pos;
+			pos = particle.pos;
 			if( pos[0] < 0 ||
 				pos[1] < 0 ||
 				pos[0] > maxX ||
 				pos[1] > maxY) {
 
-				this.plist.remove(particle);
-				this.particles_pool.retain(particle);
+				plist.remove(particle);
+				pool.retain(particle);
 				continue;
 			}
 
-			particle.addField(this.fields);
+			if(fieldslen) {
+				particle.addField(fields);
+			}
+
 			particle.move();
 		}
 	};
@@ -409,19 +398,28 @@ var Particles = (function(win) {
 	App.prototype.render = function() {
 		//var particle = particles.root;
 		var maxVel = MAX_VELOCITY * MAX_VELOCITY;
+		var data = this.plist.data;
+		var lookup = this.colorLookup;
+		var ctx = this.ctx;
+
+		var particle, vel, pos, t;
 
 		for(var i = 0; i < MAX_PARTICLES; i++) {
-			var particle = this.plist.data[i];
+			particle = data[i];
 			if(particle == null) {
 				continue;
 			}
 
-			var curVel = Vec.magsq(particle.vel);
-			var t = curVel / maxVel;
+			pos = particle.pos;
+			vel = particle.vel;
 
-			this.ctx.fillStyle = this.interpolateRgb(204,12,57,  22,147,167,  t);
-			var pos = particle.pos;
-			this.ctx.fillRect(pos[0], pos[1],
+			t = ((vel[0] * vel[0]) + (vel[1] * vel[1])) / maxVel;
+			t *= 255;
+			t |= 0;
+
+			//this.ctx.fillStyle = this.interpolateRgb(204,12,57,  22,147,167,  t);
+			ctx.fillStyle = lookup[t];
+			ctx.fillRect(pos[0], pos[1],
 					 PARTICLE_SIZE, 
 					 PARTICLE_SIZE);
 
