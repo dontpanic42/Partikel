@@ -7,35 +7,30 @@ var Particles = (function(win) {
 	var MAX_NUM_COLORS = 16;
 
 
-	var LinkedList = function() {
-		this.root = null;
-		this.length = 0;
-	};
+	var SparseArray = function(size) {
+		this.data = new Array(size);
+		this.freeIndices = new Array(size);
+		this.freePointer = size - 1;
+		this.used = 0;
 
-	LinkedList.prototype.insert = function(obj) {
-		this.length++;
-
-		if(this.root == null) {
-			this.root = obj;
-		} else {
-			this.root.prev = obj;
-			obj.next = this.root;
-			this.root = obj;
+		for(var i = 0; i < size; i++) {
+			this.freeIndices[i] = i;
 		}
 	};
 
-	LinkedList.prototype.remove = function(obj) {
-		this.length--;
+	SparseArray.prototype.insert = function(obj) {
+		var idx = this.freeIndices[this.freePointer--];
+		obj._index = idx;
+		this.data[idx] = obj;
+		this.used++;
+	};
 
-		if(obj.next) {
-			obj.next.prev = obj.prev;
-		}
-
-		if(obj.prev) {
-			obj.prev.next = obj.next;
-		} else {
-			this.root = obj.next;
-		}
+	SparseArray.prototype.remove = function(obj) {
+		var idx = obj._index;
+		this.freeIndices[++this.freePointer] = idx;
+		this.data[idx] = null;
+		obj._index = null;
+		this.used--;
 	};
 
 
@@ -135,9 +130,7 @@ var Particles = (function(win) {
 	var Particle = function(posX, posY, velX, velY, accX, accY, damp) {	
 		this.pos = new Array(2);
 		this.vel = new Array(2);
-		this.acc = new Array(2);
-		this.next = null;
-		this.prev = null;	
+		this.acc = new Array(2);	
 		this.reset(posX, posY, velX, velY, accX, accY, damp);
 	};
 
@@ -147,8 +140,6 @@ var Particles = (function(win) {
 		this.vel[0] = velX;
 		this.vel[1] = velY;
 		this.damp = damp;
-		this.next = null;
-		this.prev = null;
 	}
 
 
@@ -184,7 +175,7 @@ var Particles = (function(win) {
 		this.particles_pool = new Pool(Particle, MAX_PARTICLES);// createPool(Particle, MAX_PARTICLES);
 
 		//var particles = new List();
-		this.plist = new LinkedList();
+		this.plist = new SparseArray(MAX_PARTICLES);
 
 		var emitterVelocity = [0, 0];
 		Vec.fromAngle(0, 2, emitterVelocity);
@@ -229,7 +220,7 @@ var Particles = (function(win) {
 		};
 
 		win.onmousedown = function(ev) {
-			console.log("Particles: ", self.plist.length);
+			console.log("Particles: ", self.plist.used);
 
 			switch(self.mouseMode) {
 				case 0: { 
@@ -276,14 +267,14 @@ var Particles = (function(win) {
 
 	App.prototype.addParticles = function() {
 		var plist = this.plist;
-		if(plist.length >= MAX_PARTICLES) {
+		if(plist.used >= MAX_PARTICLES) {
 			return;
 		}
 
 		for(var i = 0; i < this.emitters.length; i++) {
 			var emitter = this.emitters[i];
 			if(emitter.enabled) {
-				for(var j = 0; j < emitter.rate && this.plist.length < MAX_PARTICLES; j++) {
+				for(var j = 0; j < emitter.rate; j++) {
 					plist.insert(emitter.emit(this.particles_pool));
 				}
 			}
@@ -295,19 +286,21 @@ var Particles = (function(win) {
 		var maxY = this.cv.height;
 
 		var plist = this.plist;
-		//var data = this.plist.data;
+		var data = this.plist.data;
 		var pool = this.particles_pool;
 		var fields = this.fields;
 		var fieldslen = this.fields.length;
 
 		var particle, pos, vel, damp, acc = [0, 0];
 		var field, dx, dy, force, fpos, tpos, i, j;
+		var magsq, fak, maxvel = MAX_VELOCITY;
 
 		var maxp = MAX_PARTICLES;
-		var particle = plist.root;
-		var magsq, fak, maxvel = MAX_VELOCITY * MAX_VELOCITY;
-
-		while(particle != null) {
+		for(i = 0; i < maxp; i++) {
+			particle = data[i];
+			if(particle == null) {
+				continue;
+			}
 
 			pos = particle.pos;
 			if( pos[0] < 0 ||
@@ -317,8 +310,6 @@ var Particles = (function(win) {
 
 				plist.remove(particle);
 				pool.retain(particle);
-
-				particle = particle.next;
 				continue;
 			}
 
@@ -358,8 +349,6 @@ var Particles = (function(win) {
 			vel[0] *= damp;
 			vel[1] *= damp;
 			/** Particle movement end **/
-
-			particle = particle.next;
 		}
 	};
 
@@ -387,7 +376,7 @@ var Particles = (function(win) {
 	App.prototype.render = function() {
 		//var particle = particles.root;
 		var maxVel = MAX_VELOCITY * MAX_VELOCITY;
-		var plist = this.plist;
+		var data = this.plist.data;
 		var lookup = this.colorLookup;
 		var ctx = this.ctx;
 
@@ -395,9 +384,11 @@ var Particles = (function(win) {
 		var maxp = MAX_PARTICLES;
 		var maxc = MAX_NUM_COLORS;
 
-		var particle = plist.root;
-
-		while(particle != null) {
+		for(var i = 0; i < maxp; i++) {
+			particle = data[i];
+			if(particle == null) {
+				continue;
+			}
 
 			pos = particle.pos;
 			vel = particle.vel;
@@ -414,8 +405,6 @@ var Particles = (function(win) {
 			ctx.fillRect(pos[0], pos[1],
 					 PARTICLE_SIZE, 
 					 PARTICLE_SIZE);
-
-			particle = particle.next;
 		}
 	};
 
