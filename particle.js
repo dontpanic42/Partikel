@@ -165,15 +165,16 @@ var Particles = (function(win) {
 	Particle.prototype.addField = function(fields) {
 		var tAccX = 0;
 		var tAccY = 0;
-		var field, dx, dy, force;
+		var field, dx, dy, force, fpos, tpos;
+		var acc = this.acc;
 
 		for(var i = 0; i < fields.length; i++) {
 			field = fields[i];
+			fpos = field.pos;
+			tpos = this.pos;
 
-			//console.log('fieldpos', field.pos);
-
-			dx = field.pos[0] - this.pos[0];
-			dy = field.pos[1] - this.pos[1];
+			dx = fpos[0] - tpos[0];
+			dy = fpos[1] - tpos[1];
 
 			force = field.mass / Math.pow(dx*dx + dy*dy, FORCE_GRADIENT) * .6;
 
@@ -182,10 +183,10 @@ var Particles = (function(win) {
 
 		}
 
-		this.acc[0] = tAccX;
-		this.acc[1] = tAccY;
+		acc[0] = tAccX;
+		acc[1] = tAccY;
 
-		Vec.clampsq(this.acc, 1.0, this.acc);
+		Vec.clampsq(acc, 1.0, acc);
 	}
 
 	var Emitter = function(pos, vel, spread, rate) {
@@ -308,7 +309,8 @@ var Particles = (function(win) {
 	};
 
 	App.prototype.addParticles = function() {
-		if(this.plist.used >= MAX_PARTICLES) {
+		var plist = this.plist;
+		if(plist.used >= MAX_PARTICLES) {
 			return;
 		}
 
@@ -316,7 +318,7 @@ var Particles = (function(win) {
 			var emitter = this.emitters[i];
 			if(emitter.enabled) {
 				for(var j = 0; j < emitter.rate; j++) {
-					this.plist.insert(emitter.emit(this.particles_pool));
+					plist.insert(emitter.emit(this.particles_pool));
 				}
 			}
 		}
