@@ -49,19 +49,6 @@ var Particles = (function(win) {
 		}
 	};
 
-	Pool.prototype.createObj = function(argum) {
-		var objType = this.objType;
-		function F(args) {
-			return objType.apply(this, args);
-		}
-
-		F.prototype = objType.prototype;
-
-		return function() {
-			return new F(argum);
-		}	
-	};
-
 	Pool.prototype.create = function(posX, posY, velX, velY, accX, accY, damp) {
 		if(this.usedpt == -1) {
 			//console.log('erzeuge neues objekt', 'frei: ', freept, 'benutzt', usedpt);
@@ -164,12 +151,10 @@ var Particles = (function(win) {
 		vel[0] += acc[0];
 		vel[1] += acc[1];
 
-		Vec.clampsq(this.vel, MAX_VELOCITY, this.vel);
+		Vec.clampsq(vel, MAX_VELOCITY, vel);
 
 		pos[0] += vel[0];
 		pos[1] += vel[1];
-
-		Vec.mul(this.vel, this.damp, this.vel);
 
 		vel[0] *= damp;
 		vel[1] *= damp;
