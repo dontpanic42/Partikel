@@ -133,20 +133,19 @@ var Particles = (function(win) {
 	}
 
 	var Particle = function(posX, posY, velX, velY, accX, accY, damp) {	
-		this.pos = new Array(2);
-		this.vel = new Array(2);
-		this.acc = new Array(2);
+		this.data = new Array(4);	//0, 1 = pos, 2,3 = vel, 4,5 acc
+		//this.vel = new Array(2);
+		//this.acc = new Array(2);
 		this.next = null;
 		this.prev = null;	
 		this.reset(posX, posY, velX, velY, accX, accY, damp);
 	};
 
 	Particle.prototype.reset = function(posX, posY, velX, velY, damp) {
-		this.pos[0] = posX;
-		this.pos[1] = posY;
-		this.vel[0] = velX;
-		this.vel[1] = velY;
-		this.damp = damp;
+		this.data[0] = posX;
+		this.data[1] = posY;
+		this.data[2] = velX;
+		this.data[3] = velY;
 		this.next = null;
 		this.prev = null;
 	}
@@ -300,20 +299,25 @@ var Particles = (function(win) {
 		var fields = this.fields;
 		var fieldslen = this.fields.length;
 
-		var particle, pos, vel, damp, acc = [0, 0];
+		var particle, pos, vel, damp, data, acc = [0, 0];
 		var field, dx, dy, force, fpos, tpos, i, j;
 
 		var maxp = MAX_PARTICLES;
 		var particle = plist.root;
 		var magsq, fak, maxvel = MAX_VELOCITY * MAX_VELOCITY;
 
+		var posx, posy, velx, vely, damp = 0.9995;
+
 		while(particle != null) {
 
-			pos = particle.pos;
-			if( pos[0] < 0 ||
-				pos[1] < 0 ||
-				pos[0] > maxX ||
-				pos[1] > maxY) {
+			data = particle.data;
+			posx = data[0];
+			posy = data[1];
+
+			if( posx < 0 ||
+				posy < 0 ||
+				posx > maxX ||
+				posy > maxY) {
 
 				plist.remove(particle);
 				pool.retain(particle);
@@ -322,41 +326,40 @@ var Particles = (function(win) {
 				continue;
 			}
 
-
-			vel = particle.vel;
+			velx = data[2];
+			vely = data[3];
 
 			/** Particle-Field interaction **/
 			for(j = 0; j < fieldslen; j++) {
 				field = fields[j];
 				fpos = field.pos;
 
-				dx = fpos[0] - pos[0];
-				dy = fpos[1] - pos[1];
+				dx = fpos[0] - posx;
+				dy = fpos[1] - posy;
 
 				force = field.mass / Math.pow(dx*dx + dy*dy, FORCE_GRADIENT) * .6;
 
 				//war: Acceleration vector
-				vel[0] += dx * force;
-				vel[1] += dy * force;
+				velx += dx * force;
+				vely += dy * force;
 			}
 			/** Particle-Field interaction end
 
 			/** Particle movement (inlined) **/
-			damp = particle.damp;
 
 			//Vec.clampsq(vel, MAX_VELOCITY);
-			magsq = vel[0] * vel[0] + vel[1] * vel[1];
+			magsq = velx * velx + vely * vely;
 			if(magsq > maxvel) {
 				fak = maxvel / magsq;
-				vel[0] *= fak;
-				vel[1] *= fak;
+				velx *= fak;
+				vely *= fak;
 			}
 
-			pos[0] += vel[0];
-			pos[1] += vel[1];
+			data[0] += velx;
+			data[1] += vely;
 
-			vel[0] *= damp;
-			vel[1] *= damp;
+			data[2] = damp * velx;
+			data[3] = damp * vely;
 			/** Particle movement end **/
 
 			particle = particle.next;
@@ -368,12 +371,29 @@ var Particles = (function(win) {
 		this.updateParticles();
 	};
 
+	App.prototype.intTo8BitHex = function(d) {
+		if(d > 255 || d < 0) {
+			throw new Error("invalid range for d (" + d + ")");
+		}
+
+  		var hex = Number(d).toString(16);
+  		hex = "00".substr(0, 2 - hex.length) + hex; 
+  		return hex;
+	};
+
+	App.prototype.rgbToHex = function(r, g, b) {
+		return "#" + this.intTo8BitHex(r) + 
+					 this.intTo8BitHex(g) + 
+					 this.intTo8BitHex(b);
+	};
+
 	App.prototype.interpolateRgb = function(r1, g1, b1, r2, g2, b2, t) {
 		var r = (r1 + t * (r2 - r1)) | 0;
 		var g = (g1 + t * (g2 - g1)) | 0;
 		var b = (b1 + t * (b2 - b1)) | 0;
 
-		return "rgb(" + r + ", " + g + ", " + b + ")";
+		//return "rgb(" + r + ", " + g + ", " + b + ")";
+		return this.rgbToHex(r, g, b);
 	};
 
 	App.prototype.setMouseMode = function(str) {
@@ -395,23 +415,20 @@ var Particles = (function(win) {
 		var maxp = MAX_PARTICLES;
 		var maxc = MAX_NUM_COLORS;
 
-		var particle = plist.root;
+		var particle = plist.root, data;
 
 		while(particle != null) {
 
-			pos = particle.pos;
-			vel = particle.vel;
+			data = particle.data;
 
-			t = ((vel[0] * vel[0]) + (vel[1] * vel[1])) / maxVel;
-			t *= maxc;
-			t |= 0;
+			t = ((((data[2] * data[2]) + (data[3] * data[3])) / maxVel) * maxc) | 0;
 
 			if(lastt != t) {
 				ctx.fillStyle = lookup[t];
 				lastt = t;
 			}
 
-			ctx.fillRect(pos[0], pos[1],
+			ctx.fillRect(data[0], data[1],
 					 PARTICLE_SIZE, 
 					 PARTICLE_SIZE);
 
