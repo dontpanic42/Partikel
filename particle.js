@@ -266,11 +266,13 @@ var Particles = (function(win) {
 	};
 
 	App.prototype.clear = function() {
-		this.ctx.save();
-		this.ctx.globalCompositeOperation = 'multiply';
-		this.ctx.fillStyle = 'rgb(238,238,238)';
-		this.ctx.fillRect(0, 0, this.cv.width, this.cv.height);
-		this.ctx.restore();
+		var ctx = this.ctx;
+		//this.ctx.save();
+		ctx.globalCompositeOperation = 'multiply';
+		ctx.fillStyle = 'rgb(238,238,238)';
+		ctx.fillRect(0, 0, this.cv.width, this.cv.height);
+		ctx.globalCompositeOperation = 'source-over';
+		//this.ctx.restore();
 	};
 
 	App.prototype.addParticles = function() {
@@ -289,6 +291,9 @@ var Particles = (function(win) {
 		}
 	};
 
+	var fBuffer = new Float32Array(new Array(1));
+	var iBuffer = new Int32Array(fBuffer.buffer);
+
 	App.prototype.updateParticles = function() {
 		var maxX = this.cv.width;
 		var maxY = this.cv.height;
@@ -299,8 +304,8 @@ var Particles = (function(win) {
 		var fields = this.fields;
 		var fieldslen = this.fields.length;
 
-		var particle, pos, vel, damp, data, acc = [0, 0];
-		var field, dx, dy, force, fpos, tpos, i, j;
+		var particle, data;
+		var field, dx, dy, force, fpos, j;
 
 		var maxp = MAX_PARTICLES;
 		var particle = plist.root;
@@ -308,6 +313,7 @@ var Particles = (function(win) {
 
 		var posx, posy, velx, vely, damp = 0.9995;
 
+		var dxSq, dySq, forceGradient = FORCE_GRADIENT, tmp;
 		while(particle != null) {
 
 			data = particle.data;
@@ -337,7 +343,31 @@ var Particles = (function(win) {
 				dx = fpos[0] - posx;
 				dy = fpos[1] - posy;
 
-				force = field.mass / Math.pow(dx*dx + dy*dy, FORCE_GRADIENT) * .6;
+				// force = field.mass / Math.pow(dx*dx + dy*dy, FORCE_GRADIENT) * .6;
+				/* Fast approximate fractional powers, basiert auf https://code.google.com/p/fastapprox/
+					Sollte ~18 mal schneller sein als Math.pow, https://jsperf.com/fast-approx-fractional-powers 
+					Missbraucht die fp-Hardware, um schnell den exponenten zu finden :-) */
+				dxSq = dx * dx;
+				dySq = dy * dy;
+
+				/* Sollte der verwendete Browser inkompatibel sein, ersetzte folgendes durch 
+				   tmp = Math.pow(dxSq + dySq, forceGradient); */
+
+				fBuffer[0] = dxSq + dySq;
+				tmp = iBuffer[0];
+				tmp *= 1.1920928955078125e-7
+				tmp -= 126.94269504;
+				
+				// Multipliziere tmp mit dem exponent
+				tmp *= forceGradient;
+
+				// Berechne näherungsweise 2^tmp
+				iBuffer[0] = (1 << 23) * (tmp + 126.94269504);
+				tmp = fBuffer[0];
+				// tmp ist jetzt = Math.pow(dx*dx + dy*dy, FORCE_GRADIENT)
+				/* Fast approximate fractional powers ende */
+
+				force = field.mass / tmp * 0.6;
 
 				//war: Acceleration vector
 				velx += dx * force;
